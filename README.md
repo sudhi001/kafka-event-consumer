@@ -1,19 +1,20 @@
-# KafkaEventConsumer Library
+# Kafka Event Consumer Library
 
-A simple, powerful Kafka consumer library for Go applications. This library abstracts away all Kafka complexity and provides a clean, minimal interface for consuming Kafka messages with built-in health monitoring.
+A simple, high-level Kafka consumer library for Go that abstracts away the complexity of Kafka configuration and provides a clean callback-based interface for processing messages.
 
 ## Features
 
-- **Ultra-Simple**: Just 2 lines of code to get started
-- **Multiple Configuration Options**: Environment variables, TOML files, or in-code configuration
-- **Automatic Health Monitoring**: Built-in REST API for health checks and metrics
-- **Graceful Shutdown**: Proper cleanup and shutdown handling
-- **Error Handling**: Robust error handling with retry mechanisms
-- **Production Ready**: Ready for production deployment
+- **Simple 2-3 line setup** - Get a Kafka consumer running with minimal code
+- **Multiple topics support** - Consume from multiple Kafka topics simultaneously
+- **Health monitoring** - Built-in REST API for health checks and metrics
+- **Graceful shutdown** - Proper cleanup and resource management
+- **Error handling** - Automatic retries and error recovery
+- **Flexible configuration** - Environment variables, TOML files, or in-code configuration
+- **Structured logging** - JSON-formatted logs for production environments
 
 ## Quick Start
 
-### 🚀 Environment Variables (2 Lines of Code!)
+### Environment Variables (Simplest)
 
 ```go
 package main
@@ -28,8 +29,11 @@ import (
 // Your business logic - just implement this function
 func handleMessage(message []byte, topic string, partition int, offset int64) error {
     var msg struct{ ID, Data string }
-    json.Unmarshal(message, &msg)
-    fmt.Printf("Processing: %s\n", msg.Data)
+    if err := json.Unmarshal(message, &msg); err != nil {
+        return err
+    }
+    
+    fmt.Printf("Processing message from topic '%s': ID=%s, Data=%s\n", topic, msg.ID, msg.Data)
     return nil
 }
 
@@ -40,33 +44,45 @@ func main() {
 }
 ```
 
-### Configuration via Environment Variables
-
+Set environment variables:
 ```bash
-export KAFKA_BROKERS=localhost:9092
-export KAFKA_TOPIC=my-topic
-export KAFKA_GROUP_ID=my-consumer-group
-export HEALTH_PORT=8080
+export KAFKA_BROKERS="localhost:9092"
+export KAFKA_TOPICS="topic1,topic2,topic3"  # Multiple topics supported
+export KAFKA_GROUP_ID="my-consumer-group"
+export HEALTH_PORT="8080"
 ```
 
-### 📝 TOML Configuration File
+### TOML Configuration
 
 ```go
+package main
+
+import (
+    "log"
+    "kafka-event-consumer/internal/consumer"
+)
+
+func handleMessage(message []byte, topic string, partition int, offset int64) error {
+    // Your business logic here
+    fmt.Printf("Processing message from topic '%s': %s\n", topic, string(message))
+    return nil
+}
+
 func main() {
-    // Load configuration from TOML file
     consumer, err := consumer.NewConsumerFromConfig("config.toml", handleMessage)
     if err != nil {
-        log.Fatal(err)
+        log.Fatalf("Failed to create consumer: %v", err)
     }
+    
     log.Fatal(consumer.Run())
 }
 ```
 
-**Example TOML configuration (`config.toml`):**
+Example `config.toml`:
 ```toml
 [kafka]
-brokers = ["localhost:9092", "localhost:9093"]
-topic = "my-events"
+brokers = ["localhost:9092"]
+topics = ["user-events", "order-events", "system-logs"]  # Multiple topics
 group_id = "my-consumer-group"
 auto_offset_reset = "latest"
 max_bytes = 1048576
@@ -84,185 +100,138 @@ level = "info"
 format = "json"
 ```
 
-### 🔧 In-Code Configuration
+### In-Code Configuration
 
 ```go
+package main
+
+import (
+    "log"
+    "kafka-event-consumer/internal/consumer"
+)
+
+func handleMessage(message []byte, topic string, partition int, offset int64) error {
+    // Your business logic here
+    return nil
+}
+
 func main() {
-    consumer := consumer.NewSimpleConsumer(
-        []string{"localhost:9092"}, 
-        "my-topic", 
-        "my-consumer-group", 
-        handleMessage,
-    )
+    brokers := []string{"localhost:9092"}
+    topics := []string{"topic1", "topic2", "topic3"}  // Multiple topics
+    groupID := "my-consumer-group"
+    
+    consumer := consumer.NewSimpleConsumer(brokers, topics, groupID, handleMessage)
     log.Fatal(consumer.Run())
 }
 ```
 
+## Multiple Topics Support
+
+The library now supports consuming from multiple Kafka topics simultaneously:
+
+- **Environment Variables**: Use `KAFKA_TOPICS="topic1,topic2,topic3"` (comma-separated)
+- **TOML Configuration**: Use `topics = ["topic1", "topic2", "topic3"]` (array)
+- **In-Code**: Pass `[]string{"topic1", "topic2", "topic3"}` to `NewSimpleConsumer`
+
+Each topic gets its own Kafka reader and goroutine, ensuring parallel processing of messages from different topics.
+
 ## Health Monitoring
 
-The library automatically provides health monitoring endpoints:
+The library provides a built-in HTTP server with the following endpoints:
 
-- **Health Check**: `http://localhost:8080/health`
-- **Detailed Health**: `http://localhost:8080/health/detailed`
-- **Metrics**: `http://localhost:8080/metrics`
-- **Ready Probe**: `http://localhost:8080/ready`
-- **Live Probe**: `http://localhost:8080/live`
+- `GET /health` - Basic health status
+- `GET /health/detailed` - Detailed health information with configuration
+- `GET /metrics` - Prometheus-compatible metrics
+- `GET /ready` - Kubernetes readiness probe
+- `GET /live` - Kubernetes liveness probe
 
-### Example Health Response
-
+Example health response:
 ```json
 {
   "status": "running",
   "last_message": "2024-01-15T10:30:00Z",
   "messages_processed": 1234,
   "errors": 5,
-  "start_time": "2024-01-15T09:00:00Z",
-  "uptime": "1h30m0s"
+  "start_time": "2024-01-15T10:00:00Z",
+  "uptime": "30m0s"
 }
-```
-
-## Message Handler Function
-
-Your message handler function should have this signature:
-
-```go
-func(message []byte, topic string, partition int, offset int64) error
-```
-
-**Parameters:**
-- `message`: Raw message bytes from Kafka
-- `topic`: Topic name the message came from
-- `partition`: Partition number
-- `offset`: Message offset
-
-**Return Value:**
-- Return `nil` for successful processing
-- Return an error to indicate processing failure (will be logged and counted in metrics)
-
-## Running the Examples
-
-### Environment Variables Example
-1. **Install dependencies**:
-   ```bash
-   go mod tidy
-   ```
-
-2. **Set environment variables**:
-   ```bash
-   export KAFKA_BROKERS=localhost:9092
-   export KAFKA_TOPIC=my-topic
-   export KAFKA_GROUP_ID=my-consumer-group
-   ```
-
-3. **Run the example**:
-   ```bash
-   go run cmd/simple/main.go
-   ```
-
-### TOML Configuration Example
-1. **Copy the example configuration**:
-   ```bash
-   cp config.toml my-config.toml
-   # Edit my-config.toml with your settings
-   ```
-
-2. **Run with TOML config**:
-   ```bash
-   go run cmd/toml-example/main.go
-   ```
-
-### Using Make Commands
-```bash
-# Run environment variables example
-make run
-
-# Run TOML configuration example
-make run-toml
-
-# Build all examples
-make build
 ```
 
 ## Configuration Options
 
 ### Environment Variables
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KAFKA_BROKERS` | `localhost:9092` | Kafka broker addresses |
-| `KAFKA_TOPIC` | `default-topic` | Topic to consume from |
+| `KAFKA_TOPICS` | `default-topic` | Comma-separated list of topics |
 | `KAFKA_GROUP_ID` | `default-consumer-group` | Consumer group ID |
-| `KAFKA_AUTO_OFFSET_RESET` | `latest` | Offset reset behavior |
+| `KAFKA_AUTO_OFFSET_RESET` | `latest` | Offset reset strategy |
 | `KAFKA_MAX_BYTES` | `1048576` | Maximum message size |
 | `KAFKA_COMMIT_INTERVAL` | `1s` | Commit interval |
 | `KAFKA_READ_TIMEOUT` | `10s` | Read timeout |
 | `KAFKA_MAX_RETRIES` | `3` | Maximum retries |
 | `KAFKA_RETRY_BACKOFF` | `1s` | Retry backoff |
-| `HEALTH_ENABLED` | `true` | Enable health monitoring |
-| `HEALTH_PORT` | `8080` | Health check port |
+| `HEALTH_ENABLED` | `true` | Enable health server |
+| `HEALTH_PORT` | `8080` | Health server port |
 | `LOG_LEVEL` | `info` | Log level |
 | `LOG_FORMAT` | `json` | Log format |
 
-### TOML Configuration
-All the same options are available in TOML format with the same defaults. See `config.toml` for a complete example.
+All TOML configuration options have equivalent environment variable overrides.
+
+## Running the Examples
+
+```bash
+# Build the examples
+make build
+
+# Run with environment variables
+make run
+
+# Run with TOML configuration
+make run-toml
+
+# Clean build artifacts
+make clean
+```
 
 ## Production Deployment
 
-### Environment Variables (Recommended)
-```bash
-KAFKA_BROKERS=kafka1:9092,kafka2:9092,kafka3:9092
-KAFKA_TOPIC=production-events
-KAFKA_GROUP_ID=production-consumer-group
-HEALTH_PORT=8080
-```
+1. **Configuration**: Use TOML files for production configuration
+2. **Health Checks**: Configure your load balancer to use `/ready` and `/live` endpoints
+3. **Monitoring**: Use `/metrics` endpoint with Prometheus
+4. **Logging**: Set `LOG_LEVEL=info` and `LOG_FORMAT=json` for structured logging
+5. **Multiple Topics**: Configure multiple topics for different event types
 
-### TOML Configuration
-Create a `config.toml` file with your production settings and use `NewConsumerFromConfig()`.
+Example production TOML:
+```toml
+[kafka]
+brokers = ["kafka-prod-1:9092", "kafka-prod-2:9092", "kafka-prod-3:9092"]
+topics = ["user-events", "order-events", "payment-events", "system-events"]
+group_id = "production-consumer-group"
+auto_offset_reset = "earliest"
+max_bytes = 2097152
+commit_interval = "500ms"
+read_timeout = "5s"
+max_retries = 5
+retry_backoff = "2s"
 
-### Kubernetes Deployment
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kafka-consumer
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: kafka-consumer
-  template:
-    metadata:
-      labels:
-        app: kafka-consumer
-    spec:
-      containers:
-      - name: consumer
-        image: your-registry/kafka-consumer:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: KAFKA_BROKERS
-          value: "kafka1:9092,kafka2:9092,kafka3:9092"
-        - name: KAFKA_TOPIC
-          value: "production-events"
-        - name: KAFKA_GROUP_ID
-          value: "production-consumer-group"
-        livenessProbe:
-          httpGet:
-            path: /live
-            port: 8080
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 8080
+[health]
+enabled = true
+port = 8080
+
+[logging]
+level = "info"
+format = "json"
 ```
 
 ## Dependencies
 
-- `github.com/segmentio/kafka-go` - Kafka client library
 - `github.com/gin-gonic/gin` - HTTP framework for health endpoints
+- `github.com/segmentio/kafka-go` - Kafka client library
 - `github.com/sirupsen/logrus` - Structured logging
 - `github.com/BurntSushi/toml` - TOML configuration parsing
 
 ## License
 
-This project is licensed under the MIT License. 
+MIT License 

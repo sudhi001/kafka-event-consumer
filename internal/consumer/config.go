@@ -3,6 +3,7 @@ package consumer
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -18,7 +19,7 @@ type Config struct {
 // KafkaConfig represents Kafka-specific configuration
 type KafkaConfig struct {
 	Brokers         []string      `toml:"brokers"`
-	Topic           string        `toml:"topic"`
+	Topics          []string      `toml:"topics"` // Changed from single topic to multiple topics
 	GroupID         string        `toml:"group_id"`
 	AutoOffsetReset string        `toml:"auto_offset_reset"`
 	MaxBytes        int           `toml:"max_bytes"`
@@ -45,7 +46,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	config := &Config{
 		Kafka: KafkaConfig{
 			Brokers:         []string{"localhost:9092"},
-			Topic:           "default-topic",
+			Topics:          []string{"default-topic"}, // Changed to array
 			GroupID:         "default-consumer-group",
 			AutoOffsetReset: "latest",
 			MaxBytes:        1048576, // 1MB
@@ -90,8 +91,12 @@ func (c *Config) overrideWithEnvVars() {
 	if brokers := os.Getenv("KAFKA_BROKERS"); brokers != "" {
 		c.Kafka.Brokers = []string{brokers}
 	}
-	if topic := os.Getenv("KAFKA_TOPIC"); topic != "" {
-		c.Kafka.Topic = topic
+	if topics := os.Getenv("KAFKA_TOPICS"); topics != "" {
+		// Split comma-separated topics
+		c.Kafka.Topics = splitAndTrim(topics, ",")
+	} else if topic := os.Getenv("KAFKA_TOPIC"); topic != "" {
+		// Backward compatibility: single topic
+		c.Kafka.Topics = []string{topic}
 	}
 	if groupID := os.Getenv("KAFKA_GROUP_ID"); groupID != "" {
 		c.Kafka.GroupID = groupID
@@ -148,7 +153,7 @@ func (c *Config) overrideWithEnvVars() {
 func (c *Config) ToConsumerConfig() *ConsumerConfig {
 	return &ConsumerConfig{
 		Brokers:           c.Kafka.Brokers,
-		Topic:             c.Kafka.Topic,
+		Topics:            c.Kafka.Topics, // Changed to array
 		GroupID:           c.Kafka.GroupID,
 		AutoOffsetReset:   c.Kafka.AutoOffsetReset,
 		MaxBytes:          c.Kafka.MaxBytes,
@@ -166,4 +171,16 @@ func parseInt(s string) (int, error) {
 	var i int
 	_, err := fmt.Sscanf(s, "%d", &i)
 	return i, err
+}
+
+// Helper function to split string and trim whitespace
+func splitAndTrim(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

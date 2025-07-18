@@ -48,7 +48,7 @@ func (kec *KafkaEventConsumer) startHealthServer() {
 				"uptime":             time.Since(status.StartTime).String(),
 			},
 			"configuration": gin.H{
-				"topic":             kec.config.Topic,
+				"topics":            kec.config.Topics,
 				"group_id":          kec.config.GroupID,
 				"brokers":           kec.config.Brokers,
 				"auto_offset_reset": kec.config.AutoOffsetReset,

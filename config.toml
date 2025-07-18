@@ -3,61 +3,42 @@
 
 [kafka]
 # Kafka broker addresses
-brokers = ["localhost:9092", "localhost:9093", "localhost:9094"]
+brokers = ["localhost:9092"]
 
-# Topic to consume from
-topic = "my-events"
+# Multiple topics to consume from (comma-separated or array)
+topics = ["user-events", "order-events", "system-logs"]
 
 # Consumer group ID
 group_id = "my-consumer-group"
 
-# Offset reset behavior: "earliest" or "latest"
+# Offset reset strategy: "earliest" or "latest"
 auto_offset_reset = "latest"
 
-# Maximum message size in bytes (1MB)
+# Maximum message size in bytes
 max_bytes = 1048576
 
-# How often to commit offsets
+# Commit interval for offsets
 commit_interval = "1s"
 
-# Timeout for reading messages
+# Read timeout
 read_timeout = "10s"
 
-# Maximum number of retries on error
+# Maximum retries for failed operations
 max_retries = 3
 
-# Backoff duration between retries
+# Retry backoff duration
 retry_backoff = "1s"
 
 [health]
-# Enable health monitoring
+# Enable health check server
 enabled = true
 
 # Health check server port
 port = 8080
 
 [logging]
-# Log level: "debug", "info", "warn", "error"
+# Log level: debug, info, warn, error
 level = "info"
 
-# Log format: "json" or "text"
-format = "json"
-
-# Example environment-specific configurations
-# [environments.development]
-# [environments.development.kafka]
-# brokers = ["localhost:9092"]
-# topic = "dev-events"
-# group_id = "dev-consumer-group"
-
-# [environments.production]
-# [environments.production.kafka]
-# brokers = ["kafka-prod-1:9092", "kafka-prod-2:9092", "kafka-prod-3:9092"]
-# topic = "production-events"
-# group_id = "production-consumer-group"
-# auto_offset_reset = "earliest"
-# max_bytes = 2097152
-# commit_interval = "500ms"
-# read_timeout = "5s"
-# max_retries = 5
-# retry_backoff = "2s" 
+# Log format: json, text
+format = "json" 

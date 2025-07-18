@@ -19,7 +19,7 @@ type MessageHandler func(message []byte, topic string, partition int, offset int
 // ConsumerConfig holds the configuration for the Kafka consumer
 type ConsumerConfig struct {
 	Brokers           []string
-	Topic             string
+	Topics            []string // Changed from single Topic to multiple Topics
 	GroupID           string
 	AutoOffsetReset   string // "earliest" or "latest"
 	MaxBytes          int    // Maximum message size in bytes
@@ -34,7 +34,7 @@ type ConsumerConfig struct {
 // KafkaEventConsumer is the main consumer framework
 type KafkaEventConsumer struct {
 	config       *ConsumerConfig
-	reader       *kafka.Reader
+	readers      []*kafka.Reader
 	handler      MessageHandler
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -68,13 +68,16 @@ func NewConsumerFromConfig(configPath string, handler MessageHandler) (*KafkaEve
 // NewConsumer creates a consumer with environment variable configuration
 func NewConsumer(handler MessageHandler) *KafkaEventConsumer {
 	brokers := getEnvOrDefault("KAFKA_BROKERS", "localhost:9092")
-	topic := getEnvOrDefault("KAFKA_TOPIC", "default-topic")
+	topics := getEnvOrDefault("KAFKA_TOPICS", "default-topic")
 	groupID := getEnvOrDefault("KAFKA_GROUP_ID", "default-consumer-group")
 	port := getEnvOrDefault("HEALTH_PORT", "8080")
 
+	// Split comma-separated topics
+	topicList := splitAndTrim(topics, ",")
+
 	config := &ConsumerConfig{
 		Brokers:           []string{brokers},
-		Topic:             topic,
+		Topics:            topicList,
 		GroupID:           groupID,
 		AutoOffsetReset:   "latest",
 		MaxBytes:          1048576,
@@ -90,10 +93,10 @@ func NewConsumer(handler MessageHandler) *KafkaEventConsumer {
 }
 
 // NewSimpleConsumer creates a new simple consumer with minimal configuration
-func NewSimpleConsumer(brokers []string, topic, groupID string, handler MessageHandler) *KafkaEventConsumer {
+func NewSimpleConsumer(brokers []string, topics []string, groupID string, handler MessageHandler) *KafkaEventConsumer {
 	config := &ConsumerConfig{
 		Brokers:           brokers,
-		Topic:             topic,
+		Topics:            topics,
 		GroupID:           groupID,
 		AutoOffsetReset:   "latest",
 		MaxBytes:          1048576, // 1MB
@@ -164,7 +167,7 @@ func (kec *KafkaEventConsumer) StartAndWait() error {
 	fmt.Printf("✅ Kafka consumer started successfully!\n")
 	fmt.Printf("📊 Health check: http://localhost:%d/health\n", kec.config.HealthCheckPort)
 	fmt.Printf("📈 Metrics: http://localhost:%d/metrics\n", kec.config.HealthCheckPort)
-	fmt.Printf("🔄 Topic: %s, Group: %s\n", kec.config.Topic, kec.config.GroupID)
+	fmt.Printf("🔄 Topics: %v, Group: %s\n", kec.config.Topics, kec.config.GroupID)
 	fmt.Printf("⏹️  Press Ctrl+C to stop\n\n")
 
 	// Wait for interrupt signal
@@ -190,28 +193,33 @@ func (kec *KafkaEventConsumer) Start() error {
 		return fmt.Errorf("consumer is already running")
 	}
 
-	// Create Kafka reader
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:          kec.config.Brokers,
-		Topic:            kec.config.Topic,
-		GroupID:          kec.config.GroupID,
-		MinBytes:         10e3, // 10KB
-		MaxBytes:         kec.config.MaxBytes,
-		CommitInterval:   kec.config.CommitInterval,
-		ReadBatchTimeout: kec.config.ReadBatchTimeout,
-	})
+	// Create Kafka readers for each topic
+	kec.readers = make([]*kafka.Reader, 0, len(kec.config.Topics))
 
-	// Set offset based on configuration
-	switch kec.config.AutoOffsetReset {
-	case "earliest":
-		reader.SetOffset(kafka.FirstOffset)
-	case "latest":
-		reader.SetOffset(kafka.LastOffset)
-	default:
-		reader.SetOffset(kafka.LastOffset)
+	for _, topic := range kec.config.Topics {
+		reader := kafka.NewReader(kafka.ReaderConfig{
+			Brokers:          kec.config.Brokers,
+			Topic:            topic,
+			GroupID:          kec.config.GroupID,
+			MinBytes:         10e3, // 10KB
+			MaxBytes:         kec.config.MaxBytes,
+			CommitInterval:   kec.config.CommitInterval,
+			ReadBatchTimeout: kec.config.ReadBatchTimeout,
+		})
+
+		// Set offset based on configuration
+		switch kec.config.AutoOffsetReset {
+		case "earliest":
+			reader.SetOffset(kafka.FirstOffset)
+		case "latest":
+			reader.SetOffset(kafka.LastOffset)
+		default:
+			reader.SetOffset(kafka.LastOffset)
+		}
+
+		kec.readers = append(kec.readers, reader)
 	}
 
-	kec.reader = reader
 	kec.isRunning = true
 	kec.healthStatus.mu.Lock()
 	kec.healthStatus.Status = "running"
@@ -219,7 +227,7 @@ func (kec *KafkaEventConsumer) Start() error {
 	kec.healthStatus.mu.Unlock()
 
 	kec.logger.Info("Kafka consumer started", map[string]interface{}{
-		"topic":   kec.config.Topic,
+		"topics":  kec.config.Topics,
 		"brokers": kec.config.Brokers,
 		"groupID": kec.config.GroupID,
 	})
@@ -233,12 +241,15 @@ func (kec *KafkaEventConsumer) Start() error {
 		}()
 	}
 
-	// Start consuming messages
-	kec.wg.Add(1)
-	go func() {
-		defer kec.wg.Done()
-		kec.consumeMessages()
-	}()
+	// Start consuming messages from all topics
+	for i, reader := range kec.readers {
+		topic := kec.config.Topics[i]
+		kec.wg.Add(1)
+		go func(r *kafka.Reader, t string) {
+			defer kec.wg.Done()
+			kec.consumeMessagesFromReader(r, t)
+		}(reader, topic)
+	}
 
 	return nil
 }
@@ -257,9 +268,9 @@ func (kec *KafkaEventConsumer) Stop() error {
 	// Cancel context to stop all goroutines
 	kec.cancel()
 
-	// Close reader
-	if kec.reader != nil {
-		if err := kec.reader.Close(); err != nil {
+	// Close all readers
+	for _, reader := range kec.readers {
+		if err := reader.Close(); err != nil {
 			kec.logger.Error("Error closing Kafka reader: ", err)
 		}
 	}
@@ -276,17 +287,17 @@ func (kec *KafkaEventConsumer) Stop() error {
 	return nil
 }
 
-// consumeMessages handles the main message consumption loop
-func (kec *KafkaEventConsumer) consumeMessages() {
+// consumeMessagesFromReader handles the main message consumption loop for a specific reader
+func (kec *KafkaEventConsumer) consumeMessagesFromReader(reader *kafka.Reader, topic string) {
 	for {
 		select {
 		case <-kec.ctx.Done():
-			kec.logger.Info("Consumer context cancelled, stopping message consumption")
+			kec.logger.Info("Consumer context cancelled, stopping message consumption for topic: ", topic)
 			return
 		default:
 			// Read message with timeout
 			ctx, cancel := context.WithTimeout(kec.ctx, kec.config.ReadBatchTimeout)
-			message, err := kec.reader.ReadMessage(ctx)
+			message, err := reader.ReadMessage(ctx)
 			cancel()
 
 			if err != nil {
@@ -294,7 +305,7 @@ func (kec *KafkaEventConsumer) consumeMessages() {
 					continue
 				}
 
-				kec.logger.Error("Error reading message: ", err)
+				kec.logger.Error("Error reading message from topic ", topic, ": ", err)
 				kec.healthStatus.mu.Lock()
 				kec.healthStatus.Errors++
 				kec.healthStatus.mu.Unlock()
@@ -306,7 +317,7 @@ func (kec *KafkaEventConsumer) consumeMessages() {
 
 			// Process message
 			if err := kec.processMessage(message); err != nil {
-				kec.logger.Error("Error processing message: ", err)
+				kec.logger.Error("Error processing message from topic ", topic, ": ", err)
 				kec.healthStatus.mu.Lock()
 				kec.healthStatus.Errors++
 				kec.healthStatus.mu.Unlock()
