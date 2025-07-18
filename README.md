@@ -5,15 +5,15 @@ A simple, powerful Kafka consumer library for Go applications. This library abst
 ## Features
 
 - **Ultra-Simple**: Just 2 lines of code to get started
+- **Multiple Configuration Options**: Environment variables, TOML files, or in-code configuration
 - **Automatic Health Monitoring**: Built-in REST API for health checks and metrics
-- **Environment Configuration**: Configure via environment variables
 - **Graceful Shutdown**: Proper cleanup and shutdown handling
 - **Error Handling**: Robust error handling with retry mechanisms
 - **Production Ready**: Ready for production deployment
 
 ## Quick Start
 
-### 🚀 Ultra-Simple Usage (2 Lines of Code!)
+### 🚀 Environment Variables (2 Lines of Code!)
 
 ```go
 package main
@@ -49,21 +49,7 @@ export KAFKA_GROUP_ID=my-consumer-group
 export HEALTH_PORT=8080
 ```
 
-### Alternative: In-Code Configuration
-
-```go
-func main() {
-    consumer := consumer.NewSimpleConsumer(
-        []string{"localhost:9092"}, 
-        "my-topic", 
-        "my-consumer-group", 
-        handleMessage,
-    )
-    log.Fatal(consumer.Run())
-}
-```
-
-### TOML Configuration File
+### 📝 TOML Configuration File
 
 ```go
 func main() {
@@ -96,6 +82,20 @@ port = 8080
 [logging]
 level = "info"
 format = "json"
+```
+
+### 🔧 In-Code Configuration
+
+```go
+func main() {
+    consumer := consumer.NewSimpleConsumer(
+        []string{"localhost:9092"}, 
+        "my-topic", 
+        "my-consumer-group", 
+        handleMessage,
+    )
+    log.Fatal(consumer.Run())
+}
 ```
 
 ## Health Monitoring
@@ -171,28 +171,52 @@ func(message []byte, topic string, partition int, offset int64) error
    go run cmd/toml-example/main.go
    ```
 
-## Docker Support
-
-### Build and Run
+### Using Make Commands
 ```bash
-docker build -t kafka-consumer .
-docker run -p 8080:8080 kafka-consumer
+# Run environment variables example
+make run
+
+# Run TOML configuration example
+make run-toml
+
+# Build all examples
+make build
 ```
 
-### With Docker Compose
-```bash
-docker-compose up
-```
+## Configuration Options
+
+### Environment Variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka broker addresses |
+| `KAFKA_TOPIC` | `default-topic` | Topic to consume from |
+| `KAFKA_GROUP_ID` | `default-consumer-group` | Consumer group ID |
+| `KAFKA_AUTO_OFFSET_RESET` | `latest` | Offset reset behavior |
+| `KAFKA_MAX_BYTES` | `1048576` | Maximum message size |
+| `KAFKA_COMMIT_INTERVAL` | `1s` | Commit interval |
+| `KAFKA_READ_TIMEOUT` | `10s` | Read timeout |
+| `KAFKA_MAX_RETRIES` | `3` | Maximum retries |
+| `KAFKA_RETRY_BACKOFF` | `1s` | Retry backoff |
+| `HEALTH_ENABLED` | `true` | Enable health monitoring |
+| `HEALTH_PORT` | `8080` | Health check port |
+| `LOG_LEVEL` | `info` | Log level |
+| `LOG_FORMAT` | `json` | Log format |
+
+### TOML Configuration
+All the same options are available in TOML format with the same defaults. See `config.toml` for a complete example.
 
 ## Production Deployment
 
-### Environment Variables
+### Environment Variables (Recommended)
 ```bash
 KAFKA_BROKERS=kafka1:9092,kafka2:9092,kafka3:9092
 KAFKA_TOPIC=production-events
 KAFKA_GROUP_ID=production-consumer-group
 HEALTH_PORT=8080
 ```
+
+### TOML Configuration
+Create a `config.toml` file with your production settings and use `NewConsumerFromConfig()`.
 
 ### Kubernetes Deployment
 ```yaml
@@ -212,7 +236,7 @@ spec:
     spec:
       containers:
       - name: consumer
-        image: kafka-consumer:latest
+        image: your-registry/kafka-consumer:latest
         ports:
         - containerPort: 8080
         env:
@@ -237,6 +261,7 @@ spec:
 - `github.com/segmentio/kafka-go` - Kafka client library
 - `github.com/gin-gonic/gin` - HTTP framework for health endpoints
 - `github.com/sirupsen/logrus` - Structured logging
+- `github.com/BurntSushi/toml` - TOML configuration parsing
 
 ## License
 
