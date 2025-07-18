@@ -1,0 +1,63 @@
+# Kafka Event Consumer Configuration
+# Copy this file to your project and modify as needed
+
+[kafka]
+# Kafka broker addresses
+brokers = ["localhost:9092", "localhost:9093", "localhost:9094"]
+
+# Topic to consume from
+topic = "my-events"
+
+# Consumer group ID
+group_id = "my-consumer-group"
+
+# Offset reset behavior: "earliest" or "latest"
+auto_offset_reset = "latest"
+
+# Maximum message size in bytes (1MB)
+max_bytes = 1048576
+
+# How often to commit offsets
+commit_interval = "1s"
+
+# Timeout for reading messages
+read_timeout = "10s"
+
+# Maximum number of retries on error
+max_retries = 3
+
+# Backoff duration between retries
+retry_backoff = "1s"
+
+[health]
+# Enable health monitoring
+enabled = true
+
+# Health check server port
+port = 8080
+
+[logging]
+# Log level: "debug", "info", "warn", "error"
+level = "info"
+
+# Log format: "json" or "text"
+format = "json"
+
+# Example environment-specific configurations
+# [environments.development]
+# [environments.development.kafka]
+# brokers = ["localhost:9092"]
+# topic = "dev-events"
+# group_id = "dev-consumer-group"
+
+# [environments.production]
+# [environments.production.kafka]
+# brokers = ["kafka-prod-1:9092", "kafka-prod-2:9092", "kafka-prod-3:9092"]
+# topic = "production-events"
+# group_id = "production-consumer-group"
+# auto_offset_reset = "earliest"
+# max_bytes = 2097152
+# commit_interval = "500ms"
+# read_timeout = "5s"
+# max_retries = 5
+# retry_backoff = "2s" 

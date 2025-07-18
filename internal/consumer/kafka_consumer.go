@@ -55,6 +55,16 @@ type HealthStatus struct {
 	mu                sync.RWMutex
 }
 
+// NewConsumerFromConfig creates a consumer from TOML configuration file
+func NewConsumerFromConfig(configPath string, handler MessageHandler) (*KafkaEventConsumer, error) {
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	return NewKafkaEventConsumer(config.ToConsumerConfig(), handler), nil
+}
+
 // NewConsumer creates a consumer with environment variable configuration
 func NewConsumer(handler MessageHandler) *KafkaEventConsumer {
 	brokers := getEnvOrDefault("KAFKA_BROKERS", "localhost:9092")

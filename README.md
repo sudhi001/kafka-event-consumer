@@ -63,6 +63,41 @@ func main() {
 }
 ```
 
+### TOML Configuration File
+
+```go
+func main() {
+    // Load configuration from TOML file
+    consumer, err := consumer.NewConsumerFromConfig("config.toml", handleMessage)
+    if err != nil {
+        log.Fatal(err)
+    }
+    log.Fatal(consumer.Run())
+}
+```
+
+**Example TOML configuration (`config.toml`):**
+```toml
+[kafka]
+brokers = ["localhost:9092", "localhost:9093"]
+topic = "my-events"
+group_id = "my-consumer-group"
+auto_offset_reset = "latest"
+max_bytes = 1048576
+commit_interval = "1s"
+read_timeout = "10s"
+max_retries = 3
+retry_backoff = "1s"
+
+[health]
+enabled = true
+port = 8080
+
+[logging]
+level = "info"
+format = "json"
+```
+
 ## Health Monitoring
 
 The library automatically provides health monitoring endpoints:
@@ -104,8 +139,9 @@ func(message []byte, topic string, partition int, offset int64) error
 - Return `nil` for successful processing
 - Return an error to indicate processing failure (will be logged and counted in metrics)
 
-## Running the Example
+## Running the Examples
 
+### Environment Variables Example
 1. **Install dependencies**:
    ```bash
    go mod tidy
@@ -121,6 +157,18 @@ func(message []byte, topic string, partition int, offset int64) error
 3. **Run the example**:
    ```bash
    go run cmd/simple/main.go
+   ```
+
+### TOML Configuration Example
+1. **Copy the example configuration**:
+   ```bash
+   cp config.toml my-config.toml
+   # Edit my-config.toml with your settings
+   ```
+
+2. **Run with TOML config**:
+   ```bash
+   go run cmd/toml-example/main.go
    ```
 
 ## Docker Support

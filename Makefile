@@ -4,10 +4,11 @@
 help:
 	@echo "Available targets:"
 	@echo "  deps        - Install dependencies"
-	@echo "  build       - Build the example"
+	@echo "  build       - Build the examples"
 	@echo "  test        - Run tests"
 	@echo "  lint        - Run linter"
 	@echo "  run         - Run simple example"
+	@echo "  run-toml    - Run TOML example"
 	@echo "  clean       - Clean build artifacts"
 
 # Install dependencies
@@ -15,9 +16,10 @@ deps:
 	go mod tidy
 	go mod download
 
-# Build example
+# Build examples
 build:
 	go build -o bin/simple cmd/simple/main.go
+	go build -o bin/toml-example cmd/toml-example/main.go
 
 # Run tests
 test:
@@ -30,6 +32,10 @@ lint:
 # Run simple example
 run:
 	go run cmd/simple/main.go
+
+# Run TOML example
+run-toml:
+	go run cmd/toml-example/main.go
 
 # Clean build artifacts
 clean:
