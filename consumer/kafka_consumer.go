@@ -21,14 +21,17 @@ type ConsumerConfig struct {
 	Brokers           []string
 	Topics            []string // Changed from single Topic to multiple Topics
 	GroupID           string
-	AutoOffsetReset   string // "earliest" or "latest"
-	MaxBytes          int    // Maximum message size in bytes
+	AutoOffsetReset   string        // "earliest" or "latest"
+	MaxBytes          int           // Maximum message size in bytes
 	CommitInterval    time.Duration
 	ReadBatchTimeout  time.Duration
 	MaxRetries        int
 	RetryBackoff      time.Duration
 	HealthCheckPort   int
 	EnableHealthCheck bool
+	// Worker pool configuration
+	WorkerCount      int // Number of parallel workers (default: 10)
+	MessageQueueSize int // Size of message queue buffer (default: 100)
 }
 
 // KafkaEventConsumer is the main consumer framework
@@ -43,6 +46,8 @@ type KafkaEventConsumer struct {
 	mu           sync.RWMutex
 	healthStatus *HealthStatus
 	logger       *logrus.Logger
+	// Worker pool
+	messageQueue chan kafka.Message
 }
 
 // HealthStatus represents the health status of the consumer
@@ -71,9 +76,23 @@ func NewConsumer(handler MessageHandler) *KafkaEventConsumer {
 	topics := getEnvOrDefault("KAFKA_TOPICS", "default-topic")
 	groupID := getEnvOrDefault("KAFKA_GROUP_ID", "default-consumer-group")
 	port := getEnvOrDefault("HEALTH_PORT", "8080")
+	workers := getEnvOrDefault("KAFKA_WORKERS", "20")
+	queueSize := getEnvOrDefault("KAFKA_QUEUE_SIZE", "100")
 
 	// Split comma-separated topics
 	topicList := splitAndTrim(topics, ",")
+
+	// Parse worker count
+	workerCount := 20
+	if w, err := parseInt(workers); err == nil {
+		workerCount = w
+	}
+
+	// Parse queue size
+	msgQueueSize := 100
+	if q, err := parseInt(queueSize); err == nil {
+		msgQueueSize = q
+	}
 
 	config := &ConsumerConfig{
 		Brokers:           []string{brokers},
@@ -87,6 +106,8 @@ func NewConsumer(handler MessageHandler) *KafkaEventConsumer {
 		RetryBackoff:      1 * time.Second,
 		HealthCheckPort:   parsePort(port),
 		EnableHealthCheck: true,
+		WorkerCount:       workerCount,
+		MessageQueueSize:  msgQueueSize,
 	}
 
 	return NewKafkaEventConsumer(config, handler)
@@ -106,6 +127,8 @@ func NewSimpleConsumer(brokers []string, topics []string, groupID string, handle
 		RetryBackoff:      1 * time.Second,
 		HealthCheckPort:   8080,
 		EnableHealthCheck: true,
+		WorkerCount:       20,  // 20 parallel workers
+		MessageQueueSize:  100, // Queue buffer size
 	}
 
 	return NewKafkaEventConsumer(config, handler)
@@ -123,7 +146,17 @@ func NewKafkaEventConsumer(config *ConsumerConfig, handler MessageHandler) *Kafk
 			RetryBackoff:      1 * time.Second,
 			HealthCheckPort:   8080,
 			EnableHealthCheck: true,
+			WorkerCount:       20,
+			MessageQueueSize:  100,
 		}
+	}
+
+	// Set default worker pool values if not specified
+	if config.WorkerCount <= 0 {
+		config.WorkerCount = 20
+	}
+	if config.MessageQueueSize <= 0 {
+		config.MessageQueueSize = 100
 	}
 
 	if handler == nil {
@@ -137,10 +170,11 @@ func NewKafkaEventConsumer(config *ConsumerConfig, handler MessageHandler) *Kafk
 	ctx, cancel := context.WithCancel(context.Background())
 
 	consumer := &KafkaEventConsumer{
-		config:  config,
-		handler: handler,
-		ctx:     ctx,
-		cancel:  cancel,
+		config:       config,
+		handler:      handler,
+		ctx:          ctx,
+		cancel:       cancel,
+		messageQueue: make(chan kafka.Message, config.MessageQueueSize),
 		healthStatus: &HealthStatus{
 			Status:            "stopped",
 			LastMessage:       time.Time{},
@@ -227,10 +261,21 @@ func (kec *KafkaEventConsumer) Start() error {
 	kec.healthStatus.mu.Unlock()
 
 	kec.logger.Info("Kafka consumer started", map[string]interface{}{
-		"topics":  kec.config.Topics,
-		"brokers": kec.config.Brokers,
-		"groupID": kec.config.GroupID,
+		"topics":        kec.config.Topics,
+		"brokers":       kec.config.Brokers,
+		"groupID":       kec.config.GroupID,
+		"workerCount":   kec.config.WorkerCount,
+		"queueSize":     kec.config.MessageQueueSize,
 	})
+
+	// Start worker pool for parallel message processing
+	for i := 0; i < kec.config.WorkerCount; i++ {
+		kec.wg.Add(1)
+		go func(workerID int) {
+			defer kec.wg.Done()
+			kec.worker(workerID)
+		}(i)
+	}
 
 	// Start health check server if enabled
 	if kec.config.EnableHealthCheck {
@@ -275,6 +320,9 @@ func (kec *KafkaEventConsumer) Stop() error {
 		}
 	}
 
+	// Close message queue to signal workers to stop
+	close(kec.messageQueue)
+
 	kec.isRunning = false
 	kec.healthStatus.mu.Lock()
 	kec.healthStatus.Status = "stopped"
@@ -315,15 +363,78 @@ func (kec *KafkaEventConsumer) consumeMessagesFromReader(reader *kafka.Reader, t
 				continue
 			}
 
-			// Process message
-			if err := kec.processMessage(message); err != nil {
-				kec.logger.Error("Error processing message from topic ", topic, ": ", err)
+			// Send message to worker pool queue
+			select {
+			case kec.messageQueue <- message:
+				// Message queued successfully
+			case <-kec.ctx.Done():
+				return
+			default:
+				// Queue is full, log warning
+				kec.logger.Warn("Message queue is full, dropping message")
 				kec.healthStatus.mu.Lock()
 				kec.healthStatus.Errors++
 				kec.healthStatus.mu.Unlock()
 			}
 		}
 	}
+}
+
+// worker processes messages from the message queue (parallel processing)
+func (kec *KafkaEventConsumer) worker(workerID int) {
+	kec.logger.Debug("Worker started", map[string]interface{}{"workerID": workerID})
+	
+	for {
+		select {
+		case <-kec.ctx.Done():
+			kec.logger.Debug("Worker stopping", map[string]interface{}{"workerID": workerID})
+			return
+		case message, ok := <-kec.messageQueue:
+			if !ok {
+				// Channel closed, exit
+				kec.logger.Debug("Worker: message queue closed", map[string]interface{}{"workerID": workerID})
+				return
+			}
+			
+			// Process message with retry logic
+			if err := kec.processMessageWithRetry(message); err != nil {
+				kec.logger.Error("Worker failed to process message", map[string]interface{}{
+					"workerID":  workerID,
+					"error":     err,
+					"topic":     message.Topic,
+					"partition": message.Partition,
+					"offset":    message.Offset,
+				})
+			}
+		}
+	}
+}
+
+// processMessageWithRetry processes a message with retry logic
+func (kec *KafkaEventConsumer) processMessageWithRetry(message kafka.Message) error {
+	var err error
+	for attempt := 0; attempt <= kec.config.MaxRetries; attempt++ {
+		if attempt > 0 {
+			kec.logger.Debug("Retrying message processing", map[string]interface{}{
+				"attempt": attempt,
+				"topic":   message.Topic,
+				"offset":  message.Offset,
+			})
+			time.Sleep(kec.config.RetryBackoff * time.Duration(attempt))
+		}
+		
+		err = kec.processMessage(message)
+		if err == nil {
+			return nil // Success
+		}
+	}
+	
+	// All retries failed
+	kec.healthStatus.mu.Lock()
+	kec.healthStatus.Errors++
+	kec.healthStatus.mu.Unlock()
+	
+	return fmt.Errorf("failed after %d retries: %w", kec.config.MaxRetries, err)
 }
 
 // processMessage processes a single Kafka message
