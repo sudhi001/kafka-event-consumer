@@ -1,4 +1,4 @@
-module kafka-event-consumer
+module github.com/sudhi001/kafka-event-consumer
 
 go 1.24.1
 
