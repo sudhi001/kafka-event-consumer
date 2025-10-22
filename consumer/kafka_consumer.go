@@ -2,9 +2,11 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,8 +23,8 @@ type ConsumerConfig struct {
 	Brokers           []string
 	Topics            []string // Changed from single Topic to multiple Topics
 	GroupID           string
-	AutoOffsetReset   string        // "earliest" or "latest"
-	MaxBytes          int           // Maximum message size in bytes
+	AutoOffsetReset   string // "earliest" or "latest"
+	MaxBytes          int    // Maximum message size in bytes
 	CommitInterval    time.Duration
 	ReadBatchTimeout  time.Duration
 	MaxRetries        int
@@ -261,11 +263,11 @@ func (kec *KafkaEventConsumer) Start() error {
 	kec.healthStatus.mu.Unlock()
 
 	kec.logger.Info("Kafka consumer started", map[string]interface{}{
-		"topics":        kec.config.Topics,
-		"brokers":       kec.config.Brokers,
-		"groupID":       kec.config.GroupID,
-		"workerCount":   kec.config.WorkerCount,
-		"queueSize":     kec.config.MessageQueueSize,
+		"topics":      kec.config.Topics,
+		"brokers":     kec.config.Brokers,
+		"groupID":     kec.config.GroupID,
+		"workerCount": kec.config.WorkerCount,
+		"queueSize":   kec.config.MessageQueueSize,
 	})
 
 	// Start worker pool for parallel message processing
@@ -349,7 +351,10 @@ func (kec *KafkaEventConsumer) consumeMessagesFromReader(reader *kafka.Reader, t
 			cancel()
 
 			if err != nil {
-				if err == context.DeadlineExceeded || err == context.Canceled {
+				// Check for timeout/deadline errors (normal when no messages available)
+				if errors.Is(err, context.DeadlineExceeded) ||
+					errors.Is(err, context.Canceled) ||
+					strings.Contains(err.Error(), "context deadline exceeded") {
 					continue
 				}
 
@@ -383,7 +388,7 @@ func (kec *KafkaEventConsumer) consumeMessagesFromReader(reader *kafka.Reader, t
 // worker processes messages from the message queue (parallel processing)
 func (kec *KafkaEventConsumer) worker(workerID int) {
 	kec.logger.Debug("Worker started", map[string]interface{}{"workerID": workerID})
-	
+
 	for {
 		select {
 		case <-kec.ctx.Done():
@@ -395,7 +400,7 @@ func (kec *KafkaEventConsumer) worker(workerID int) {
 				kec.logger.Debug("Worker: message queue closed", map[string]interface{}{"workerID": workerID})
 				return
 			}
-			
+
 			// Process message with retry logic
 			if err := kec.processMessageWithRetry(message); err != nil {
 				kec.logger.Error("Worker failed to process message", map[string]interface{}{
@@ -422,18 +427,18 @@ func (kec *KafkaEventConsumer) processMessageWithRetry(message kafka.Message) er
 			})
 			time.Sleep(kec.config.RetryBackoff * time.Duration(attempt))
 		}
-		
+
 		err = kec.processMessage(message)
 		if err == nil {
 			return nil // Success
 		}
 	}
-	
+
 	// All retries failed
 	kec.healthStatus.mu.Lock()
 	kec.healthStatus.Errors++
 	kec.healthStatus.mu.Unlock()
-	
+
 	return fmt.Errorf("failed after %d retries: %w", kec.config.MaxRetries, err)
 }
 
