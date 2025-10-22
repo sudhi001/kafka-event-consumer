@@ -107,6 +107,19 @@ func (kec *KafkaEventConsumer) startHealthServer() {
 		c.JSON(http.StatusOK, gin.H{"status": "alive"})
 	})
 
+	// Backward-compatible endpoints (for existing monitoring configs)
+	router.GET("/health/ready", func(c *gin.Context) {
+		if kec.IsRunning() {
+			c.String(http.StatusOK, "READY")
+		} else {
+			c.String(http.StatusServiceUnavailable, "NOT_READY")
+		}
+	})
+
+	router.GET("/health/live", func(c *gin.Context) {
+		c.String(http.StatusOK, "ALIVE")
+	})
+
 	// Start server
 	addr := ":" + strconv.Itoa(kec.config.HealthCheckPort)
 	kec.logger.Info("Starting health check server", map[string]interface{}{
@@ -114,6 +127,8 @@ func (kec *KafkaEventConsumer) startHealthServer() {
 		"endpoints": []string{
 			"GET /health",
 			"GET /health/detailed",
+			"GET /health/ready (backward-compatible)",
+			"GET /health/live (backward-compatible)",
 			"GET /metrics",
 			"GET /ready",
 			"GET /live",
