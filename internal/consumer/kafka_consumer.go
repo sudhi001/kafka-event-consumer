@@ -81,8 +81,8 @@ func NewConsumer(handler MessageHandler) *KafkaEventConsumer {
 		GroupID:           groupID,
 		AutoOffsetReset:   "latest",
 		MaxBytes:          1048576,
-		CommitInterval:    1 * time.Second,
-		ReadBatchTimeout:  10 * time.Second,
+		CommitInterval:    100 * time.Millisecond,
+		ReadBatchTimeout:  10 * time.Millisecond,
 		MaxRetries:        3,
 		RetryBackoff:      1 * time.Second,
 		HealthCheckPort:   parsePort(port),
@@ -100,8 +100,8 @@ func NewSimpleConsumer(brokers []string, topics []string, groupID string, handle
 		GroupID:           groupID,
 		AutoOffsetReset:   "latest",
 		MaxBytes:          1048576, // 1MB
-		CommitInterval:    1 * time.Second,
-		ReadBatchTimeout:  10 * time.Second,
+		CommitInterval:    100 * time.Millisecond,
+		ReadBatchTimeout:  10 * time.Millisecond,
 		MaxRetries:        3,
 		RetryBackoff:      1 * time.Second,
 		HealthCheckPort:   8080,
@@ -201,10 +201,10 @@ func (kec *KafkaEventConsumer) Start() error {
 			Brokers:          kec.config.Brokers,
 			Topic:            topic,
 			GroupID:          kec.config.GroupID,
-			MinBytes:         10e3, // 10KB
+			MinBytes:         1, // Return immediately when message is available
 			MaxBytes:         kec.config.MaxBytes,
 			CommitInterval:   kec.config.CommitInterval,
-			ReadBatchTimeout: kec.config.ReadBatchTimeout,
+			ReadBatchTimeout: 10 * time.Millisecond, // Very short timeout for real-time
 		})
 
 		// Set offset based on configuration
@@ -295,14 +295,12 @@ func (kec *KafkaEventConsumer) consumeMessagesFromReader(reader *kafka.Reader, t
 			kec.logger.Info("Consumer context cancelled, stopping message consumption for topic: ", topic)
 			return
 		default:
-			// Read message with timeout
-			ctx, cancel := context.WithTimeout(kec.ctx, kec.config.ReadBatchTimeout)
-			message, err := reader.ReadMessage(ctx)
-			cancel()
+			// Read message without timeout for real-time processing
+			message, err := reader.ReadMessage(kec.ctx)
 
 			if err != nil {
-				if err == context.DeadlineExceeded || err == context.Canceled {
-					continue
+				if err == context.Canceled {
+					return
 				}
 
 				kec.logger.Error("Error reading message from topic ", topic, ": ", err)

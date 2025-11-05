@@ -18,10 +18,10 @@ auto_offset_reset = "latest"
 max_bytes = 1048576
 
 # Commit interval for offsets
-commit_interval = "1s"
+commit_interval = "100ms"
 
-# Read timeout
-read_timeout = "10s"
+# Read timeout (very short for real-time processing)
+read_timeout = "10ms"
 
 # Maximum retries for failed operations
 max_retries = 3

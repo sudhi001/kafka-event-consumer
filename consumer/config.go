@@ -50,8 +50,8 @@ func LoadConfig(configPath string) (*Config, error) {
 			GroupID:         "default-consumer-group",
 			AutoOffsetReset: "latest",
 			MaxBytes:        1048576, // 1MB
-			CommitInterval:  1 * time.Second,
-			ReadTimeout:     10 * time.Second,
+			CommitInterval:  100 * time.Millisecond,
+			ReadTimeout:     10 * time.Millisecond,
 			MaxRetries:      3,
 			RetryBackoff:    1 * time.Second,
 		},
